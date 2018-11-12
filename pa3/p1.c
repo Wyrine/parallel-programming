@@ -27,6 +27,7 @@ main(int argc, char **argv)
 		{
 			A[i][j] = double_rand(-1.0, 1.0);
 		}
+		fprintf(stderr, "x[%d] = %lf\n", i, x[i]);
 	}
 	printf("solution vector:\n");
 	for(i = 0; i < 128; i++)

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 	double
 double_rand( double min, double max )
@@ -18,6 +19,7 @@ main(int argc, char **argv)
 	double b[128];
 	double A[128][128];
 	int i, j;
+	clock_t start = clock();
 	for(i = 0; i < 128; i++)
 	{
 		x[i] = double_rand(-1.0, 1.0);
@@ -36,5 +38,6 @@ main(int argc, char **argv)
 		}
 		printf("\tb[%d] = %lf\n", i, b[i]);
 	}
+	printf("Total time: %lf\n", (clock() - start) / (double) CLOCKS_PER_SEC);
 	return 0;
 }

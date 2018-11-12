@@ -15,6 +15,7 @@ main(int argc, char **argv)
 {
 	srand(0);
 	double x[128];
+	double b[128];
 	double A[128][128];
 	int i, j;
 	for(i = 0; i < 128; i++)
@@ -24,6 +25,16 @@ main(int argc, char **argv)
 		{
 			A[i][j] = double_rand(-1.0, 1.0);
 		}
+	}
+	printf("solution vector:\n");
+	for(i = 0; i < 128; i++)
+	{	
+		b[i] = 0.0;
+		for(j = 0; j < 128; j++)
+		{
+			b[i] += (A[i][j] * x[j]);
+		}
+		printf("\tb[%d] = %lf\n", i, b[i]);
 	}
 	return 0;
 }

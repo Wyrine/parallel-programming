@@ -32,6 +32,49 @@ matmul(double **A, double **B, double **C, int dims)
 				C[i][j] += (A[i][k] * B[k][j]);
 }
 
+int
+build_matrices(double ***A, double ***B, double ***C, int rank, int world)
+{
+	int subsects = sqrt(world);
+	int dims = N / subsects;
+	int i, j;
+	if(rank == 0)
+	{
+		A[0] = calloc(sizeof(double), N);
+		B[0] = calloc(sizeof(double), N);
+		C[0] = calloc(sizeof(double), N);
+		for(i = 0; i < N; i++)
+		{
+			A[0][i] = calloc(sizeof(double), N); 
+			B[0][i] = calloc(sizeof(double), N); 
+			C[0][i] = calloc(sizeof(double), N); 
+			for(j = 0; j < N; j++)
+			{
+				A[0][i][j] = genA(i,j); 
+				B[0][i][j] = genB(i,j);
+#ifdef DEBUG
+				printf("rank: %d, A[%d][%d] = %lf, B[%d][%d] = %lf\n", rank, i, j, A[0][i][j],
+						j, i, B[0][i][j]);
+#endif
+			}
+		}
+	}
+	else
+	{
+		A[0] = calloc(sizeof(double), dims);
+		B[0] = calloc(sizeof(double), dims);
+		C[0] = calloc(sizeof(double), dims);
+		for(i = 0; i < dims; i++)
+		{
+			A[0][i] =  calloc(sizeof(double), dims);
+			B[0][i] =  calloc(sizeof(double), dims);
+			C[0][i] =  calloc(sizeof(double), dims);
+		}
+	}
+	MPI_Scatter(
+	return dims;
+}
+
 	int
 main(int argc, char **argv)
 {
@@ -43,25 +86,10 @@ main(int argc, char **argv)
 	MPI_Comm_size(MPI_COMM_WORLD, &world);
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-	subsects = sqrt(world);
-	int dims = N / subsects;
-	double A[dims][dims], B[dims][dims], C[dims][dims];
+	double **A, **B, **C;
+	int dims = build_matrices(&A, &B, &C, rank, world);
+	printf("rank %d, val: %lf\n", rank, A[0][0]);
 
-	if(rank == 0)
-	{
-		for(i = 0; i < N; i++)
-		{
-			for(j = 0; j < N; j++)
-			{
-				A[i][j] = genA(i,j); 
-				B[i][j] = genB(i,j);
-#ifdef DEBUG
-				printf("rank: %d, A[%d][%d] = %lf, B[%d][%d] = %lf\n", rank, i, j, A[i][j],
-						j, i, B[i][j]);
-#endif
-			}
-		}
-	}
 	MPI_Finalize();
 	return 0;
 }

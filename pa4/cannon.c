@@ -12,6 +12,7 @@
 genA(int i, int j)
 {
 	const double x = 0.0001;
+
 	return x*(1+i+j); 
 }
 

@@ -1,96 +1,164 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include <limits.h>
 #include <string.h>
-#include <mpi.h>
+#include "mpi.h"
 
-#define N 128
-//#define DEBUG
+#define N (2)
+#define low (0.0)
+#define high (1.0)
 
 	double 
-genA(int i, int j)
+getElt()
 {
-	const double x = 0.0001;
-
-	return x*(1+i+j); 
+	double scale = rand() / (double) RAND_MAX; /* [0, 1.0] */
+	return low + scale * ( high - low );      /* [low, high] */
 }
 
-	double
-genB(int i, int j)
+//if negate is set, then we are doing matrix B and so set the indices to be negative
+	void 
+fill(double *A, int local, int negate)
 {
-	const double x = -0.0005;
-	return x*(-1-i-j);
+	int i, j;
+	for(i = 0; i < local; i++)
+		for(j = 0; j < local; j++)
+			A[i*local + j] = (negate) ? -1.0 * getElt() : getElt();
+}
+
+//pseudo-scatter function -- create the block matrices and then send them to
+//the proper processes
+	double* 
+initMat(int negate, int rank, int p, MPI_Comm mesh2D)
+{
+	int root_p = sqrt(p);
+	int local = N / root_p;
+	int send_rank;
+	int i,j;
+	// 2D array local x local
+	double *A = malloc(sizeof(double) * local * local); 
+
+	//if non-zero rank, then just receive the block matrix and return it
+	if(rank > 0)
+	{
+		MPI_Status status;
+		MPI_Recv(A, local*local, MPI_DOUBLE, 0, 0, mesh2D, &status);
+		return A;
+	}
+	//otherwise, create root_p x root_p submatrices
+	for(i = root_p -1; i >= 0; i--)
+	{
+		for(j = root_p -1; j >= 0; j--)
+		{
+			int coords[] = {i, j};
+			fill(A, local, negate);
+			//get the rank of the processor at (i, j)
+			MPI_Cart_rank(mesh2D, coords, &send_rank);
+			//and send to that processor unless it's me
+			printf("Sending to %d, coords: (%d, %d)\n", send_rank, coords[0], coords[1]);
+			if(send_rank > 0)
+				MPI_Send(A, local*local, MPI_DOUBLE, send_rank, 0, mesh2D);
+		}
+	}
+	return A;
+}
+
+//performs matrix multiplication and stores results into C
+	void 
+matmul(double *A, double *B, double *C, int local)
+{
+	int i, j, k;
+	for(i=0; i < local; i++)
+		for(j = 0; j < local; j++)
+			for(k = 0; k < local; k++)
+				C[i*local + j] += (A[i*local + k]*B[k*local + j]);
+}
+
+	void 
+initial_align(double *A, double *B, int local, int coords[], MPI_Comm mesh2D)
+{
+	MPI_Status s;
+	int left, right, up, down;
+	/* shift block matrices of A left by row index in mesh */
+	MPI_Cart_shift(mesh2D, 1, coords[0], &left, &right); 
+	MPI_Sendrecv_replace(A, local*local, MPI_DOUBLE, left, 0, right, 0, mesh2D, &s);
+
+	/* shift block matrices of B up by column index in mesh */
+	MPI_Cart_shift(mesh2D, 0, coords[1], &up, &down);
+	MPI_Sendrecv_replace(B, local*local, MPI_DOUBLE, up, 0, down, 0, mesh2D, &s);
+}
+	void
+cannon(double *A, double *B, double *C, int local, int p, int root_p, MPI_Comm mesh2D)
+{
+	int rank;
+	MPI_Comm_rank(mesh2D, &rank);
+	int i, left, right, up, down;
+	for(i = 1; i < root_p; i++)
+	{
+		MPI_Cart_shift(mesh2D, 1, 1, &left, &right);
+		MPI_Sendrecv_replace(A, local*local, MPI_DOUBLE, left, 0, right, 0, mesh2D, MPI_STATUS_IGNORE);
+
+		MPI_Cart_shift(mesh2D, 0, 1, &up, &down);
+		MPI_Sendrecv_replace(B, local*local, MPI_DOUBLE, up, 0, down, 0, mesh2D, MPI_STATUS_IGNORE);
+
+		matmul(A, B, C, local);
+	}
 }
 
 	void
-matmul(double **A, double **B, double **C, int dims)
+printMat(double *C, int rank)
 {
-	int i, j, k;
-	for(i = 0; i < dims; i++)
-		for(j = 0; j < dims; j++)
-			for(k = 0; k < dims; k++)
-				C[i][j] += (A[i][k] * B[k][j]);
-}
-
-int
-build_matrices(double ***A, double ***B, double ***C, int rank, int world)
-{
-	int subsects = sqrt(world);
-	int dims = N / subsects;
 	int i, j;
-	if(rank == 0)
-	{
-		A[0] = calloc(sizeof(double), N);
-		B[0] = calloc(sizeof(double), N);
-		C[0] = calloc(sizeof(double), N);
-		for(i = 0; i < N; i++)
+	for(i = 0; i < N; i++)
+		for(j = 0; j < N; j++)
 		{
-			A[0][i] = calloc(sizeof(double), N); 
-			B[0][i] = calloc(sizeof(double), N); 
-			C[0][i] = calloc(sizeof(double), N); 
-			for(j = 0; j < N; j++)
-			{
-				A[0][i][j] = genA(i,j); 
-				B[0][i][j] = genB(i,j);
-#ifdef DEBUG
-				printf("rank: %d, A[%d][%d] = %lf, B[%d][%d] = %lf\n", rank, i, j, A[0][i][j],
-						j, i, B[0][i][j]);
-#endif
-			}
+			printf("rank %d, C[%d][%d] = %lf\n", rank, i, j, C[i*N + j]);
 		}
-	}
-	else
-	{
-		A[0] = calloc(sizeof(double), dims);
-		B[0] = calloc(sizeof(double), dims);
-		C[0] = calloc(sizeof(double), dims);
-		for(i = 0; i < dims; i++)
-		{
-			A[0][i] =  calloc(sizeof(double), dims);
-			B[0][i] =  calloc(sizeof(double), dims);
-			C[0][i] =  calloc(sizeof(double), dims);
-		}
-	}
-	MPI_Scatter(
-	return dims;
 }
 
 	int
 main(int argc, char **argv)
 {
-	int i, j;
-	int subsects;
-	int world, rank;
-
+	//one dimensional array representation of a 2D array
+	double *A, *B, *C;
+	int p, rank, root_p;
+	int coord[2];
+	int local;
+	MPI_Comm mesh2D;
 	MPI_Init(&argc, &argv);
-	MPI_Comm_size(MPI_COMM_WORLD, &world);
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &p);
 
-	double **A, **B, **C;
-	int dims = build_matrices(&A, &B, &C, rank, world);
-	printf("rank %d, val: %lf\n", rank, A[0][0]);
+	int dims[] = {0,0};
+	//set up cyclic connections between edge processors
+	int qperiodic[] = {1,1};
 
+	//create 2D mesh of processors
+	MPI_Dims_create(p, 2, dims);
+	MPI_Cart_create(MPI_COMM_WORLD, 2, dims, qperiodic, 1, &mesh2D); 
+	MPI_Comm_rank(mesh2D, &rank);
+	MPI_Cart_coords(mesh2D, rank, 2, coord);
+
+	srand(0);
+	root_p = sqrt(p);
+	local = N / root_p;
+
+	A = initMat(0, rank, p, mesh2D);
+	B = initMat(1, rank, p, mesh2D);
+	if(rank != 0)
+		C = calloc(sizeof(double), local*local);
+	else //for gather at the end
+		C = calloc(sizeof(double), N*N);
+
+	/* do the initial setup and do first matmul */
+	initial_align(A, B, local, coord, mesh2D);
+	matmul(A, B, C, local);
+
+	cannon(A, B, C, local, p, root_p, mesh2D);
+	//gather to proc 0
+	double tmp[N*N];
+	MPI_Gather(C, local*local, MPI_DOUBLE, tmp, local*local, MPI_DOUBLE, 0, mesh2D);
+	if(rank == 0)
+		printMat(tmp, rank);
+	free(A);free(B);free(C);
 	MPI_Finalize();
 	return 0;
 }

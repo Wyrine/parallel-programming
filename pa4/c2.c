@@ -14,28 +14,47 @@ double getElt()
 	return low + scale * ( high - low );      /* [low, high] */
 }
 
-void initMat(double A[], int negate)
-{
-	int i,j;
-	for(i = 0; i < N; i++)
-		for(j = 0; j < N; j++)
-			A[i*N + j] = (negate) ? -1.0 * getElt() : getElt();
-}
-
-double **create_mat(int sz)
-{
-	//do one malloc call so that we can use scatter
-	double **A = malloc( sz* (sizeof(double*) + sz * sizeof(double)));
-	int i;
-	int * const data = A + sz;
-	for(i = 0; i < sz; i++)
-		A[i] = data + i * sz;
-	return A;
-}
-
-void printMat(double A[], int r, int c)
+//if negate is set, then we are doing matrix B and so set the indices to be negative
+void fill(double *A, int local, int negate)
 {
 	int i, j;
+	for(i = 0; i < local; i++)
+		for(j = 0; j < local; j++)
+			A[i*local + j] = (negate) ? -1.0 * getElt() : getElt();
+}
+
+//pseudo-scatter function
+double* initMat(int negate, int rank, int p, MPI_Comm mesh2D)
+{
+	int root_p = sqrt(p);
+	int local = N / root_p;
+	int send_rank;
+	double *A = malloc(sizeof(double) * local * local); // 2D array local x local
+
+	//if non-zero rank, then just receive the block matrix and return it
+	if(rank > 0)
+	{
+		MPI_Status status;
+		MPI_Recv(A, local*local, MPI_DOUBLE, 0, 0, mesh2D, &status);
+		return A;
+	}
+	int i,j;
+	//otherwise, create root_p x root_p submatrices
+	for(i = root_p -1; i >= 0; i--)
+	{
+		for(j = root_p -1; j >= 0; j--)
+		{
+			int coords[] = {i, j};
+			fill(A, local, negate);
+			//get the rank of the processor at (i, j)
+			MPI_Cart_rank(mesh2D, coords, &send_rank);
+			//and send to that processor unless it's me
+			if(send_rank > 0)
+				MPI_Send(A, local*local, MPI_DOUBLE, send_rank, 0, mesh2D);
+		}
+	}
+	//fill(A, local, negate);
+	return A;
 }
 
 	int
@@ -53,48 +72,17 @@ main(int argc, char **argv)
 
 	//create 2D mesh of processors
 	MPI_Dims_create(p, 2, dims);
-	MPI_Cart_create(MPI_COMM_WORLD, 2, dims, qperiodic, 1, &mesh2D); 
+	MPI_Cart_create(MPI_COMM_WORLD, 2, dims, qperiodic, 0, &mesh2D); 
 	MPI_Comm_rank(mesh2D, &rank);
 	MPI_Cart_coords(mesh2D, rank, 2, coord);
 
+	srand(0);
 	local = N / sqrt(p);
-	//double A[N][N], B[N][N], C[N][N];
 	double *A, *B, *C;
-	if(rank == 0) 
-	{
-		srand(0);
-		A = malloc(N*N*sizeof(double));
-		initMat(A, 0);
-		B = malloc(N*N*sizeof(double));
-		initMat(B, 1);
-		C = calloc(sizeof(double), N*N);
-	}
-	else
-	{
-		A = malloc(local*local*sizeof(double));
-		B = malloc(local*local*sizeof(double));
-		C = calloc(sizeof(double), local*local);
-	}
-	MPI_Scatter(A, local*local, MPI_DOUBLE, A, local*local, MPI_DOUBLE, 0, mesh2D);
-	MPI_Scatter(B, local*local, MPI_DOUBLE, B, local*local, MPI_DOUBLE, 0, mesh2D);
-	if(rank == 0)
-	{
-		printf("rank: %d, (%d, %d)\n", rank, coord[0], coord[1]);
-/*
-		for(i = 0; i < local; i++)
-			for(j = local; j < N; j++)
-				fprintf(stderr, "A[%d][%d] = %lf\n", i, j%local, A[i*N + j]);
-*/
-	}
-	if(rank == 1)
-	{
-		printf("rank: %d, (%d, %d)\n", rank, coord[0], coord[1]);
-/*
-		for(i = 0; i < local; i++)
-			for(j = 0; j < local; j++)
-				fprintf(stdout, "A[%d][%d] = %lf\n", i, j, A[i*local + j]);
-*/
-	}
+
+	A = initMat(0, rank, p, mesh2D);
+	B = initMat(1, rank, p, mesh2D);
+	C = calloc(sizeof(double), local*local);
 
 	free(A);free(B);free(C);
 	MPI_Finalize();

@@ -4,7 +4,6 @@ Authors: Kirolos Shahat and Grace Zhao
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-//#include <string.h>
 #include "mpi.h"
 
 #define N (256)
@@ -136,7 +135,6 @@ gather(double ***C, int local, int p, int root_p, MPI_Comm mesh2D)
 			}
 		}
 	}	
-
 }
 
 	int
